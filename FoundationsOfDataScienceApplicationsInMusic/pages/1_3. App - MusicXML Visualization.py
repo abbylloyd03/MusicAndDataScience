@@ -163,7 +163,7 @@ else:
         # also build rel mapping so plotting code can always reference it
         color_dict_rel = {i+1: custom_colors_pc[i] for i in range(12)}
     else:
-        st.markdown("**Custom colors — scale degrees (1 = tonic)**")
+        st.markdown("**Custom colors — chromatic scale degrees (1 = tonic)**")
         cols_rel = st.columns(4)
         custom_colors_rel = []
         for i in range(12):
@@ -383,7 +383,44 @@ else:
             # filter using the numeric measure column
             filtered = df[(df['measure_num'] >= measure_range[0]) & (df['measure_num'] <= measure_range[1])]
 
-        # ── Plot ──
+            # Infer the key for the selected measure range (for display in the table)
+            selected_range_key = None
+            stream_key = None
+            if title == 'File 1':
+                stream_key = st.session_state.get('left_stream')
+            else:
+                stream_key = st.session_state.get('right_stream')
+
+            if stream_key is not None:
+                try:
+                    elems = []
+                    for el in stream_key.flatten().getElementsByClass([note.Note, chord.Chord]):
+                        mnum = getattr(el, 'measureNumber', None)
+                        if mnum is None:
+                            continue
+                        try:
+                            mnum_i = int(mnum)
+                        except Exception:
+                            continue
+                        if measure_range[0] <= mnum_i <= measure_range[1]:
+                            elems.append(el)
+                    if elems:
+                        sub = stream.Stream()
+                        for el in elems:
+                            sub.insert(el.offset, el)
+                        try:
+                            k = sub.analyze('key')
+                            selected_range_key = k.name
+                        except Exception:
+                            selected_range_key = None
+                except Exception:
+                    selected_range_key = None
+
+            # ensure filtered is a copy before we mutate it and add selected key
+            filtered = filtered.copy()
+            filtered['selected_range_key'] = selected_range_key
+
+            # ── Plot ──
         fig, ax = plt.subplots(figsize=(11, 6))
 
         if filtered.empty:
@@ -572,7 +609,7 @@ else:
                 for val, label in zip(present_vals, present_labels)
             ]
 
-            legend_title = "Pitch Class" if color_by == "Pitch class" else "Scale Degree"
+            legend_title = "Pitch Class" if color_by == "Pitch class" else "Chromatic Scale Degree"
             ax.legend(handles=handles,
                       title=legend_title,
                       bbox_to_anchor=(1.05, 1),
@@ -584,7 +621,7 @@ else:
         # Ensure the table shows columns in a consistent, useful order.
         ordered_cols = [
             'measure', 'offset', 'duration', 'pitch', 'pitch_class',
-            'pc_mod', 'file_key', 'pitch_rel_to_key'
+            'pc_mod', 'file_key', 'selected_range_key', 'pitch_rel_to_key'
         ]
         # Make a safe copy and add any missing columns (filled with None)
         table_df = filtered.copy()
