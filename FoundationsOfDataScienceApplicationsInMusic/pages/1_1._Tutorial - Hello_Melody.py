@@ -97,7 +97,6 @@ st.header("Tips and Next Steps")
 st.markdown("""
 - Why "Hello Melody"? It's like printing "Hello World" in code, but you hear it! Builds skills in music + programming.
 - Fun Challenge: Extend the melody to the full "Twinkle Twinkle Little Star" or code your own tune!
-- Next Steps:
 
 """)
 
