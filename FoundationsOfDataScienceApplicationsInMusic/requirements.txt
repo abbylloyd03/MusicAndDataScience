@@ -1,0 +1,12 @@
+# Minimal requirements for deploying the Streamlit MusicXML visualizer
+# Adjust versions to match your environment if needed.
+streamlit>=1.20
+music21>=7.0
+pandas>=1.4
+seaborn>=0.12
+matplotlib>=3.5
+numpy>=1.22
+
+# Optional (useful for packaging / deployment tools)
+python-dateutil
+```
