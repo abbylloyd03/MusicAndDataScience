@@ -8,19 +8,6 @@ This lab introduces chords in music21. You'll learn to create, manipulate, and a
 Run this in Google Colab for free (no local setup). Copy the code below into a new Colab notebook, or use the button for a pre-filled one.
 """)
 
-st.header("About music21 and Chords")
-st.markdown("""
-music21 is an open-source toolkit developed at MIT for computational musicology and symbolic music data. It provides powerful tools for working with music in Python, including chords, which are objects combining multiple pitches.
-
-### Key Concepts:
-- **Creation**: Build chords from pitch names, notes, or MIDI numbers.
-- **Manipulation**: Add/remove pitches, set durations, reposition (e.g., closedPosition).
-- **Analysis**: Check triad types (major/minor), get common names, inversions, interval vectors.
-- **Post-Tonal Features**: Interval vectors, prime forms, Forte classes for advanced analysis.
-- **Display/Export**: Show notation, add to streams, export to MIDI.
-
-For beginners, focus on creating simple triads, checking their types, and playing them back. 
-""")
 
 st.header("About music21 Chords and pandas Integration")
 st.markdown("""
