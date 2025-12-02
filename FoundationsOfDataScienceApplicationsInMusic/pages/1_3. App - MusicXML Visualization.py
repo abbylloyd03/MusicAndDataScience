@@ -26,16 +26,94 @@ st.markdown(
 )
 
 # ── Uploaders ─────────────────────────────────────────────────────
-left_file = st.file_uploader("File 1 (required)", type=["xml", "mxl"])
-right_file = st.file_uploader("File 2 (optional)", type=["xml", "mxl"])
+# discover samples folder and available sample files so we can show
+# a sample-select option next to each uploader
+samples_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'samples'))
+try:
+    os.makedirs(samples_dir, exist_ok=True)
+except Exception:
+    pass
 
-# If the user clears an uploader (clicks the X), remove its cached DataFrame
-# so the visualization and controls disappear.
-if left_file is None and st.session_state.get("left_df") is not None:
+sample_files = []
+try:
+    for fn in os.listdir(samples_dir):
+        if fn.lower().endswith(('.xml', '.mxl')):
+            sample_files.append(fn)
+except Exception:
+    sample_files = []
+
+# Global input-mode toggle using Streamlit's toggle widget when available.
+# Falls back to a checkbox for older Streamlit versions.
+if hasattr(st, 'toggle'):
+    use_samples = st.toggle("Use sample files for both panes", value=False, key='use_samples_both')
+else:
+    use_samples = st.checkbox("Use sample files for both panes", value=False, key='use_samples_both')
+
+# Map boolean to the previous `mode` values used by the UI code
+mode = "Choose sample" if use_samples else "Upload file"
+
+# If the user just switched from Upload -> Choose sample, clear any uploaded-file
+# visualizations so the panes are empty until a sample is selected.
+prev_use = st.session_state.get('prev_use_samples_both')
+if prev_use is None:
+    # initialize previous state tracking
+    st.session_state['prev_use_samples_both'] = use_samples
+else:
+    # switched from False -> True
+    if prev_use is False and use_samples is True:
+        # Clear cached DataFrames/names so previous uploaded plots disappear.
+        if st.session_state.get('left_df') is not None:
+            st.session_state.left_df = None
+            st.session_state.left_name = None
+        if st.session_state.get('right_df') is not None:
+            st.session_state.right_df = None
+            st.session_state.right_name = None
+    # update previous-state for next run
+    st.session_state['prev_use_samples_both'] = use_samples
+
+# Show uploaders/selectors side-by-side
+left_col, right_col = st.columns(2)
+
+# Left side UI follows the global `mode`
+left_file = None
+left_choice = None
+if mode == "Upload file":
+    left_file = left_col.file_uploader("File 1 (required)", type=["xml", "mxl"], key='uploader_left')
+    # If a file upload occurs, cancel any pending sample load for left
+    if left_file is not None and st.session_state.get('sample_left_to_load'):
+        st.session_state.pop('sample_left_to_load', None)
+else:
+    if sample_files:
+        left_choice = left_col.selectbox("Choose sample for File 1", ["(none)"] + sample_files, key='sample_left_choice_ui')
+        if left_choice and left_choice != "(none)":
+            st.session_state['sample_left_to_load'] = left_choice
+            st.session_state['ignore_uploader_left'] = True
+    else:
+        left_col.info("No sample files available")
+
+# Right side UI follows the same global `mode`
+right_file = None
+right_choice = None
+if mode == "Upload file":
+    right_file = right_col.file_uploader("File 2 (optional)", type=["xml", "mxl"], key='uploader_right')
+    if right_file is not None and st.session_state.get('sample_right_to_load'):
+        st.session_state.pop('sample_right_to_load', None)
+else:
+    if sample_files:
+        right_choice = right_col.selectbox("Choose sample for File 2", ["(none)"] + sample_files, key='sample_right_choice_ui')
+        if right_choice and right_choice != "(none)":
+            st.session_state['sample_right_to_load'] = right_choice
+            st.session_state['ignore_uploader_right'] = True
+    else:
+        right_col.info("No sample files available")
+
+# If the user cleared an uploaded file while in Upload mode, remove its cached DataFrame
+# (but don't remove sample-loaded data when in Choose-sample mode).
+if mode == "Upload file" and left_file is None and st.session_state.get("left_df") is not None:
     st.session_state.left_df = None
     st.session_state.left_name = None
 
-if right_file is None and st.session_state.get("right_df") is not None:
+if mode == "Upload file" and right_file is None and st.session_state.get("right_df") is not None:
     st.session_state.right_df = None
     st.session_state.right_name = None
 
@@ -134,6 +212,13 @@ def file_to_df(uploaded_file):
 
             if isinstance(el, note.Note):
                 p = el.pitch
+                # try to coerce measure to an int for plotting; keep original
+                measure_num = None
+                try:
+                    if measure is not None:
+                        measure_num = int(measure)
+                except Exception:
+                    measure_num = None
                 rows.append({
                     'offset': offset,
                     'pitch': p.midi,
@@ -141,10 +226,17 @@ def file_to_df(uploaded_file):
                     'pitch_class': p.name,
                     'pc_mod': p.pitchClass,      # 0-11
                     'measure': measure,
+                    'measure_num': measure_num,
                     'file_key': file_key,
                 })
             else:  # chord
                 for p in el.pitches:
+                    measure_num = None
+                    try:
+                        if measure is not None:
+                            measure_num = int(measure)
+                    except Exception:
+                        measure_num = None
                     rows.append({
                         'offset': offset,
                         'pitch': p.midi,
@@ -152,25 +244,104 @@ def file_to_df(uploaded_file):
                         'pitch_class': p.name,
                         'pc_mod': p.pitchClass,
                         'measure': measure,
+                        'measure_num': measure_num,
                         'file_key': file_key,
                     })
         df = pd.DataFrame(rows) if rows else None
+        # Convert measure_num to a nullable integer dtype for safe numeric operations.
+        # Some MusicXML files contain non-standard measure objects; convert
+        # each value individually to avoid pandas' internal errors.
+        if df is not None and 'measure_num' in df.columns:
+            def _safe_int(v):
+                try:
+                    if v is None:
+                        return pd.NA
+                    if v is pd.NA:
+                        return pd.NA
+                    # avoid treating booleans as ints
+                    if isinstance(v, bool):
+                        return pd.NA
+                    # numeric ints are fine
+                    if isinstance(v, int):
+                        return int(v)
+                    # numpy integer types
+                    try:
+                        import numpy as _np
+                        if isinstance(v, (_np.integer,)):
+                            return int(v)
+                    except Exception:
+                        pass
+                    # fall back to converting from string representation
+                    s = str(v).strip()
+                    if s == '':
+                        return pd.NA
+                    return int(s)
+                except Exception:
+                    return pd.NA
+
+            try:
+                df['measure_num'] = df['measure_num'].apply(_safe_int).astype('Int64')
+            except Exception:
+                # Extreme fallback: coerce everything to NA
+                df['measure_num'] = pd.Series([pd.NA] * len(df), index=df.index, dtype='Int64')
         return df, stream
     except Exception as e:
         st.error(f"Error reading file: {e}")
         return None, None
 
+# If the uploader-area Load buttons placed a sample to load into session_state,
+# handle the actual parsing here (file_to_df is defined at this point).
+if st.session_state.get('sample_left_to_load'):
+    chosen = st.session_state.pop('sample_left_to_load')
+    try:
+        path = os.path.join(samples_dir, chosen)
+        with open(path, 'rb') as fh:
+            data = fh.read()
+        import io
+        bio = io.BytesIO(data)
+        bio.name = chosen
+        df_s, s_obj = file_to_df(bio)
+        st.session_state.left_df = df_s
+        st.session_state.left_stream = s_obj
+        st.session_state.left_name = f"sample:{chosen}"
+        st.success(f"Loaded sample {chosen} into File 1")
+    except Exception as e:
+        st.error(f"Could not load sample: {e}")
+
+if st.session_state.get('sample_right_to_load'):
+    chosen = st.session_state.pop('sample_right_to_load')
+    try:
+        path = os.path.join(samples_dir, chosen)
+        with open(path, 'rb') as fh:
+            data = fh.read()
+        import io
+        bio = io.BytesIO(data)
+        bio.name = chosen
+        df_s, s_obj = file_to_df(bio)
+        st.session_state.right_df = df_s
+        st.session_state.right_stream = s_obj
+        st.session_state.right_name = f"sample:{chosen}"
+        st.success(f"Loaded sample {chosen} into File 2")
+    except Exception as e:
+        st.error(f"Could not load sample: {e}")
+
 # ── Load data only when a new file is uploaded (cached in session_state) ──
-if left_file:
-    if st.session_state.get("left_df") is None or st.session_state.get("left_name") != left_file.name:
+# If a sample selection has been made that should override uploaders, skip uploader parsing.
+if st.session_state.pop('ignore_uploader_left', False):
+    # uploader intentionally ignored because user selected a sample
+    pass
+elif left_file:
+    if st.session_state.get("left_df") is None or st.session_state.get("left_name") != getattr(left_file, 'name', None):
         with st.spinner("Parsing left file…"):
             df, stream = file_to_df(left_file)
             st.session_state.left_df = df
             st.session_state.left_stream = stream
             st.session_state.left_name = left_file.name
 
-if right_file:
-    if st.session_state.get("right_df") is None or st.session_state.get("right_name") != right_file.name:
+if st.session_state.pop('ignore_uploader_right', False):
+    pass
+elif right_file:
+    if st.session_state.get("right_df") is None or st.session_state.get("right_name") != getattr(right_file, 'name', None):
         with st.spinner("Parsing right file…"):
             df, stream = file_to_df(right_file)
             st.session_state.right_df = df
@@ -193,14 +364,15 @@ else:
             return
 
         # ── Measure slider ──
-        measures = df['measure'].dropna().astype(int)
-        if measures.empty:
+        # Use the numeric `measure_num` column (safely converted at parse time)
+        measures = df.get('measure_num')
+        if measures is None or measures.dropna().empty:
             col.warning("No measure numbers – showing all data")
             filtered = df
             measure_range = (0, 0)
         else:
-            min_m = int(measures.min())
-            max_m = int(measures.max())
+            min_m = int(measures.dropna().min())
+            max_m = int(measures.dropna().max())
             measure_range = col.slider(
                 f"Measures – {title}",
                 min_value=min_m,
@@ -208,7 +380,8 @@ else:
                 value=(min_m, max_m),
                 key=f"slider_{title}"
             )
-            filtered = df[(df['measure'] >= measure_range[0]) & (df['measure'] <= measure_range[1])]
+            # filter using the numeric measure column
+            filtered = df[(df['measure_num'] >= measure_range[0]) & (df['measure_num'] <= measure_range[1])]
 
         # ── Plot ──
         fig, ax = plt.subplots(figsize=(11, 6))
@@ -249,13 +422,17 @@ else:
                 inferred_key_name = None
                 if stream_key is not None:
                     try:
-                        # collect elements within the selected measure range
+                        # collect elements within the selected measure range (coerce measure numbers safely)
                         elems = []
                         for el in stream_key.flatten().getElementsByClass([note.Note, chord.Chord]):
                             mnum = getattr(el, 'measureNumber', None)
                             if mnum is None:
                                 continue
-                            if measure_range[0] <= mnum <= measure_range[1]:
+                            try:
+                                mnum_i = int(mnum)
+                            except Exception:
+                                continue
+                            if measure_range[0] <= mnum_i <= measure_range[1]:
                                 elems.append(el)
 
                         if elems:
@@ -289,18 +466,54 @@ else:
                 if tonic_pc is not None:
                     filtered['pitch_rel_to_key'] = ((filtered['pc_mod'].astype(int) - tonic_pc) % 12) + 1
                     if inferred_key_name:
-                        col.info(f"Coloring by scale degree inferred from: {inferred_key_name}")
+                        # If the file-wide key differs from the inferred key for the
+                        # selected range, show both so the user understands the difference.
+                        try:
+                            file_keys = filtered['file_key'].dropna().unique()
+                            file_key_name = file_keys[0] if len(file_keys) > 0 else None
+                        except Exception:
+                            file_key_name = None
+
+                        if file_key_name and file_key_name != inferred_key_name:
+                            col.info(
+                                f"Coloring by scale degree inferred from: {inferred_key_name} (selected range). File-wide key: {file_key_name}."
+                            )
+                        else:
+                            col.info(f"Coloring by scale degree inferred from: {inferred_key_name}")
                 else:
                     filtered['pitch_rel_to_key'] = None
                     col.info("Could not infer a key for the selected range; no relative coloring applied.")
 
+            # Prepare a sanitized copy for plotting to avoid seaborn/pandas
+            # errors when values contain unexpected object types.
+            plotting_df = filtered.copy()
+            # Coerce numeric plotting columns; invalid values become NaN
+            for _col in ('offset', 'pitch', 'duration'):
+                if _col in plotting_df.columns:
+                    plotting_df[_col] = pd.to_numeric(plotting_df[_col], errors='coerce')
+
+            # Coerce hue column to numeric when expected (pc_mod, pitch_rel_to_key)
+            if color_field in ('pc_mod', 'pitch_rel_to_key') and color_field in plotting_df.columns:
+                plotting_df[color_field] = pd.to_numeric(plotting_df[color_field], errors='coerce')
+            else:
+                # ensure hue is string-like so seaborn treats it categorically
+                if color_field in plotting_df.columns:
+                    plotting_df[color_field] = plotting_df[color_field].astype('str')
+
+            # Drop rows that lack essential numeric coordinates
+            plotting_df = plotting_df.dropna(subset=['offset', 'pitch'])
+
+            # Ensure duration has a fallback numeric value
+            if 'duration' in plotting_df.columns:
+                plotting_df['duration'] = plotting_df['duration'].fillna(plotting_df['duration'].median() if not plotting_df['duration'].dropna().empty else 1.0)
+
             sns.scatterplot(
-                data=filtered,
+                data=plotting_df,
                 x='offset',
                 y='pitch',
-                hue=color_field,
+                hue=color_field if color_field in plotting_df.columns else None,
                 palette=palette_map,
-                size='duration',
+                size='duration' if 'duration' in plotting_df.columns else None,
                 sizes=(30, 250),
                 ax=ax,
                 legend=False          # we build our own legend
@@ -310,11 +523,11 @@ else:
             # at the mean offset for each measure and label it with the measure
             # number. If there are many measures, reduce label density.
             try:
-                measures_present = filtered['measure'].dropna().astype(int)
-                if not measures_present.empty:
+                measures_present = filtered.get('measure_num')
+                if measures_present is not None and not measures_present.dropna().empty:
                     ticks = []
-                    for m in sorted(measures_present.unique()):
-                        subset = filtered[filtered['measure'].astype(int) == m]
+                    for m in sorted(measures_present.dropna().astype(int).unique()):
+                        subset = filtered[filtered['measure_num'] == m]
                         if not subset.empty:
                             tick_pos = float(subset['offset'].mean())
                             ticks.append((tick_pos, m))
@@ -359,8 +572,9 @@ else:
                 for val, label in zip(present_vals, present_labels)
             ]
 
+            legend_title = "Pitch Class" if color_by == "Pitch class" else "Scale Degree"
             ax.legend(handles=handles,
-                      title="Pitch Class",
+                      title=legend_title,
                       bbox_to_anchor=(1.05, 1),
                       loc='upper left')
 
