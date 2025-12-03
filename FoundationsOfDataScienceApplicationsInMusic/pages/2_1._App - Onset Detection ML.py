@@ -109,6 +109,21 @@ def frames_to_times(frames, sample_rate):
     return [frame / sample_rate for frame in frames]
 
 
+def save_content_to_file(file_path, content):
+    """
+    Save content to a file, handling both bytes and string content.
+    
+    Args:
+        file_path: Path to save the file
+        content: Content to write (bytes or string)
+    """
+    with open(file_path, 'wb') as f:
+        if isinstance(content, bytes):
+            f.write(content)
+        else:
+            f.write(content.encode('utf-8'))
+
+
 # ── Feature Extraction ─────────────────────────────────────────────
 def extract_features_at_onset(y, sr, onset_time, window_size=0.05):
     """
@@ -916,24 +931,15 @@ with tab_train:
                                 
                                 # Save WAV file
                                 wav_save_path = os.path.join(recordings_dir, wav_file.name)
-                                with open(wav_save_path, 'wb') as f:
-                                    f.write(wav_content)
+                                save_content_to_file(wav_save_path, wav_content)
                                 
                                 # Save attack SVL file
                                 attack_save_path = os.path.join(recordings_dir, attack_svl.name)
-                                with open(attack_save_path, 'wb') as f:
-                                    if isinstance(attack_content, bytes):
-                                        f.write(attack_content)
-                                    else:
-                                        f.write(attack_content.encode('utf-8'))
+                                save_content_to_file(attack_save_path, attack_content)
                                 
                                 # Save sustain SVL file
                                 sustain_save_path = os.path.join(recordings_dir, sustain_svl.name)
-                                with open(sustain_save_path, 'wb') as f:
-                                    if isinstance(sustain_content, bytes):
-                                        f.write(sustain_content)
-                                    else:
-                                        f.write(sustain_content.encode('utf-8'))
+                                save_content_to_file(sustain_save_path, sustain_content)
                                 
                                 st.success(f"✓ Saved {wav_file.name} and annotation files to recordings folder")
                                 uploaded_files_saved = True
