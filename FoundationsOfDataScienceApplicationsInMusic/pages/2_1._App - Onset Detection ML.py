@@ -146,7 +146,7 @@ def extract_features_at_onset(y, sr, onset_time, window_size=0.05):
         # Attack slope (how quickly amplitude rises)
         max_idx = np.argmax(envelope)
         if max_idx > 0:
-            features['attack_slope'] = float(envelope[max_idx] / (max_idx / sr)) if max_idx > 0 else 0
+            features['attack_slope'] = float(envelope[max_idx] / (max_idx / sr))
         else:
             features['attack_slope'] = 0.0
         
@@ -524,6 +524,7 @@ with tab_train:
                         os.unlink(tmp_path)
                         
                         # Parse SVL files
+                        attack_svl.seek(0)
                         attack_data = parse_svl_file(attack_svl.read())
                         attack_times = frames_to_times(attack_data['frames'], attack_data['sample_rate'])
                         
