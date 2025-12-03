@@ -50,8 +50,8 @@ and **sustain onsets** in solo clarinet recordings.
 3. **Predict**: Upload new recordings to detect onset types
 
 ### Annotation Types:
-- **Articulation (Attack) Onsets**: Sharp, percussive beginnings of notes
-- **Sustain Onsets**: Softer, more gradual note beginnings
+- **Articulation (Attack) Onsets**: The point when an articulation begins
+- **Sustain Onsets**: The point when the articulation has settled into sustained sound
 """)
 
 # Check dependencies
@@ -384,6 +384,158 @@ def plot_feature_importance(model, feature_cols):
     return fig
 
 
+# ── Articulation Timing Analysis ───────────────────────────────────
+def pair_attack_sustain_onsets(attack_times, sustain_times):
+    """
+    Pair each attack onset with its corresponding sustain onset.
+    
+    Each attack is paired with the next sustain that occurs after it
+    (before the next attack).
+    
+    Args:
+        attack_times: List of attack onset times in seconds
+        sustain_times: List of sustain onset times in seconds
+        
+    Returns:
+        List of tuples: (attack_time, sustain_time, duration)
+    """
+    attack_times = sorted(attack_times)
+    sustain_times = sorted(sustain_times)
+    
+    pairs = []
+    sustain_idx = 0
+    
+    for i, attack_time in enumerate(attack_times):
+        # Find the next attack time (if any) to set upper bound
+        next_attack = attack_times[i + 1] if i + 1 < len(attack_times) else float('inf')
+        
+        # Find sustain that comes after this attack but before next attack
+        while sustain_idx < len(sustain_times):
+            sustain_time = sustain_times[sustain_idx]
+            
+            if sustain_time > attack_time and sustain_time < next_attack:
+                # Valid pair found
+                duration = sustain_time - attack_time
+                pairs.append({
+                    'attack_time': attack_time,
+                    'sustain_time': sustain_time,
+                    'attack_duration_ms': duration * 1000,  # Convert to milliseconds
+                    'note_index': i + 1
+                })
+                sustain_idx += 1
+                break
+            elif sustain_time >= next_attack:
+                # This sustain belongs to a later attack
+                break
+            else:
+                # Sustain is before attack, skip it
+                sustain_idx += 1
+    
+    return pairs
+
+
+def analyze_timing_consistency(pairs_df):
+    """
+    Analyze the consistency of attack durations.
+    
+    Args:
+        pairs_df: DataFrame with attack_duration_ms column
+        
+    Returns:
+        dict with statistics
+    """
+    durations = pairs_df['attack_duration_ms'].values
+    
+    stats = {
+        'count': len(durations),
+        'mean_ms': float(np.mean(durations)),
+        'std_ms': float(np.std(durations)),
+        'min_ms': float(np.min(durations)),
+        'max_ms': float(np.max(durations)),
+        'median_ms': float(np.median(durations)),
+        'cv_percent': float(np.std(durations) / np.mean(durations) * 100) if np.mean(durations) > 0 else 0,
+        'range_ms': float(np.max(durations) - np.min(durations))
+    }
+    
+    # Identify outliers (beyond 2 standard deviations)
+    mean = stats['mean_ms']
+    std = stats['std_ms']
+    pairs_df = pairs_df.copy()
+    pairs_df['is_outlier'] = (pairs_df['attack_duration_ms'] < mean - 2*std) | (pairs_df['attack_duration_ms'] > mean + 2*std)
+    stats['outlier_count'] = int(pairs_df['is_outlier'].sum())
+    
+    return stats, pairs_df
+
+
+def plot_timing_histogram(pairs_df, stats):
+    """Plot histogram of attack durations."""
+    fig, ax = plt.subplots(figsize=(10, 5))
+    
+    durations = pairs_df['attack_duration_ms'].values
+    
+    ax.hist(durations, bins=20, edgecolor='black', alpha=0.7, color='steelblue')
+    ax.axvline(stats['mean_ms'], color='red', linestyle='--', linewidth=2, label=f"Mean: {stats['mean_ms']:.1f} ms")
+    ax.axvline(stats['median_ms'], color='green', linestyle=':', linewidth=2, label=f"Median: {stats['median_ms']:.1f} ms")
+    
+    ax.set_xlabel('Attack Duration (ms)')
+    ax.set_ylabel('Frequency')
+    ax.set_title('Distribution of Attack-to-Sustain Durations')
+    ax.legend()
+    
+    plt.tight_layout()
+    return fig
+
+
+def plot_timing_over_time(pairs_df, stats):
+    """Plot attack durations over time to see consistency."""
+    fig, ax = plt.subplots(figsize=(12, 5))
+    
+    colors = ['red' if outlier else 'steelblue' for outlier in pairs_df['is_outlier']]
+    
+    ax.scatter(pairs_df['attack_time'], pairs_df['attack_duration_ms'], 
+               c=colors, s=50, alpha=0.7)
+    
+    # Add mean line
+    ax.axhline(stats['mean_ms'], color='green', linestyle='--', linewidth=2, 
+               label=f"Mean: {stats['mean_ms']:.1f} ms")
+    
+    # Add standard deviation band
+    ax.fill_between([pairs_df['attack_time'].min(), pairs_df['attack_time'].max()],
+                    stats['mean_ms'] - stats['std_ms'],
+                    stats['mean_ms'] + stats['std_ms'],
+                    alpha=0.2, color='green', label=f"±1 Std Dev: {stats['std_ms']:.1f} ms")
+    
+    ax.set_xlabel('Time in Recording (s)')
+    ax.set_ylabel('Attack Duration (ms)')
+    ax.set_title('Attack Duration Consistency Over Time')
+    ax.legend()
+    
+    # Mark outliers in legend
+    from matplotlib.lines import Line2D
+    legend_elements = [
+        Line2D([0], [0], marker='o', color='w', markerfacecolor='steelblue', markersize=10, label='Normal'),
+        Line2D([0], [0], marker='o', color='w', markerfacecolor='red', markersize=10, label='Outlier (>2σ)'),
+        Line2D([0], [0], color='green', linestyle='--', linewidth=2, label=f"Mean: {stats['mean_ms']:.1f} ms"),
+    ]
+    ax.legend(handles=legend_elements, loc='upper right')
+    
+    plt.tight_layout()
+    return fig
+
+
+def plot_timing_boxplot(pairs_df):
+    """Create a boxplot of attack durations."""
+    fig, ax = plt.subplots(figsize=(6, 5))
+    
+    ax.boxplot(pairs_df['attack_duration_ms'].values, vert=True)
+    ax.set_ylabel('Attack Duration (ms)')
+    ax.set_title('Attack Duration Distribution')
+    ax.set_xticklabels(['All Notes'])
+    
+    plt.tight_layout()
+    return fig
+
+
 # ── Session State Initialization ───────────────────────────────────
 if 'trained_model' not in st.session_state:
     st.session_state.trained_model = None
@@ -393,7 +545,7 @@ if 'trained_model' not in st.session_state:
 
 
 # ── Main Application Tabs ──────────────────────────────────────────
-tab_train, tab_predict, tab_about = st.tabs(["🎓 Train Model", "🎯 Predict", "ℹ️ About"])
+tab_train, tab_predict, tab_analyze, tab_about = st.tabs(["🎓 Train Model", "🎯 Predict", "📊 Analyze Timing", "ℹ️ About"])
 
 with tab_train:
     st.header("Train Onset Detection Model")
@@ -728,6 +880,160 @@ with tab_predict:
                     )
 
 
+with tab_analyze:
+    st.header("Articulation Timing Analysis")
+    
+    st.markdown("""
+    This tool analyzes the **attack duration** — the time between when an articulation starts 
+    (attack onset) and when it settles into sustained sound (sustain onset).
+    
+    Consistent attack durations indicate uniform articulation technique across a performance.
+    """)
+    
+    st.subheader("Upload Annotation Files")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        analyze_attack_svl = st.file_uploader(
+            "Attack Annotations (.svl)",
+            type=['svl'],
+            key='analyze_attacks'
+        )
+    
+    with col2:
+        analyze_sustain_svl = st.file_uploader(
+            "Sustain Annotations (.svl)",
+            type=['svl'],
+            key='analyze_sustain'
+        )
+    
+    # Option to use sample data
+    recordings_dir_analyze = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'recordings'))
+    use_sample_analyze = st.checkbox("Use sample data from recordings folder", value=False, key='use_sample_analyze')
+    
+    if st.button("Analyze Timing Consistency", type="primary", key='analyze_btn'):
+        attack_times = None
+        sustain_times = None
+        
+        if use_sample_analyze and os.path.exists(recordings_dir_analyze):
+            sample_files = os.listdir(recordings_dir_analyze)
+            attack_samples = [f for f in sample_files if 'attack' in f.lower() and f.endswith('.svl')]
+            sustain_samples = [f for f in sample_files if 'sustain' in f.lower() and f.endswith('.svl')]
+            
+            if attack_samples and sustain_samples:
+                with st.spinner("Loading sample annotations..."):
+                    attack_path = os.path.join(recordings_dir_analyze, attack_samples[0])
+                    with open(attack_path, 'r') as f:
+                        attack_data = parse_svl_file(f.read())
+                    attack_times = frames_to_times(attack_data['frames'], attack_data['sample_rate'])
+                    
+                    sustain_path = os.path.join(recordings_dir_analyze, sustain_samples[0])
+                    with open(sustain_path, 'r') as f:
+                        sustain_data = parse_svl_file(f.read())
+                    sustain_times = frames_to_times(sustain_data['frames'], sustain_data['sample_rate'])
+                    
+                    st.info(f"Using sample data: {attack_samples[0]} and {sustain_samples[0]}")
+            else:
+                st.error("Sample annotation files not found in recordings folder")
+        
+        elif analyze_attack_svl and analyze_sustain_svl:
+            with st.spinner("Parsing annotation files..."):
+                attack_data = parse_svl_file(analyze_attack_svl.read())
+                attack_times = frames_to_times(attack_data['frames'], attack_data['sample_rate'])
+                
+                analyze_sustain_svl.seek(0)
+                sustain_data = parse_svl_file(analyze_sustain_svl.read())
+                sustain_times = frames_to_times(sustain_data['frames'], sustain_data['sample_rate'])
+        else:
+            st.warning("Please upload both attack and sustain SVL files, or use sample data.")
+        
+        if attack_times and sustain_times:
+            # Pair onsets and calculate durations
+            pairs = pair_attack_sustain_onsets(attack_times, sustain_times)
+            
+            if not pairs:
+                st.error("Could not pair attack and sustain onsets. Ensure annotations are properly aligned.")
+            else:
+                pairs_df = pd.DataFrame(pairs)
+                stats, pairs_df = analyze_timing_consistency(pairs_df)
+                
+                # Display summary statistics
+                st.subheader("Summary Statistics")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Notes Analyzed", stats['count'])
+                with col2:
+                    st.metric("Mean Duration", f"{stats['mean_ms']:.1f} ms")
+                with col3:
+                    st.metric("Std Deviation", f"{stats['std_ms']:.1f} ms")
+                with col4:
+                    st.metric("Coefficient of Variation", f"{stats['cv_percent']:.1f}%")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Minimum", f"{stats['min_ms']:.1f} ms")
+                with col2:
+                    st.metric("Maximum", f"{stats['max_ms']:.1f} ms")
+                with col3:
+                    st.metric("Range", f"{stats['range_ms']:.1f} ms")
+                with col4:
+                    st.metric("Outliers (>2σ)", stats['outlier_count'])
+                
+                # Consistency interpretation
+                st.subheader("Consistency Assessment")
+                cv = stats['cv_percent']
+                if cv < 10:
+                    st.success(f"✓ **Excellent consistency**: CV = {cv:.1f}% — Attack durations are highly uniform.")
+                elif cv < 20:
+                    st.info(f"◐ **Good consistency**: CV = {cv:.1f}% — Attack durations are reasonably consistent with some variation.")
+                elif cv < 30:
+                    st.warning(f"◑ **Moderate consistency**: CV = {cv:.1f}% — Noticeable variation in attack durations.")
+                else:
+                    st.error(f"✗ **Low consistency**: CV = {cv:.1f}% — Significant variation in attack durations.")
+                
+                # Visualizations
+                st.subheader("Visualizations")
+                
+                viz_col1, viz_col2 = st.columns(2)
+                
+                with viz_col1:
+                    st.markdown("**Distribution of Attack Durations**")
+                    fig_hist = plot_timing_histogram(pairs_df, stats)
+                    st.pyplot(fig_hist)
+                    plt.close(fig_hist)
+                
+                with viz_col2:
+                    st.markdown("**Attack Duration Box Plot**")
+                    fig_box = plot_timing_boxplot(pairs_df)
+                    st.pyplot(fig_box)
+                    plt.close(fig_box)
+                
+                st.markdown("**Attack Duration Over Time**")
+                fig_time = plot_timing_over_time(pairs_df, stats)
+                st.pyplot(fig_time)
+                plt.close(fig_time)
+                
+                # Detailed data table
+                st.subheader("Detailed Note-by-Note Data")
+                display_df = pairs_df[['note_index', 'attack_time', 'sustain_time', 'attack_duration_ms', 'is_outlier']].copy()
+                display_df.columns = ['Note #', 'Attack Time (s)', 'Sustain Time (s)', 'Attack Duration (ms)', 'Outlier']
+                display_df['Attack Time (s)'] = display_df['Attack Time (s)'].round(3)
+                display_df['Sustain Time (s)'] = display_df['Sustain Time (s)'].round(3)
+                display_df['Attack Duration (ms)'] = display_df['Attack Duration (ms)'].round(2)
+                st.dataframe(display_df)
+                
+                # Download results
+                csv = pairs_df.to_csv(index=False)
+                st.download_button(
+                    label="Download Analysis Results (CSV)",
+                    data=csv,
+                    file_name="articulation_timing_analysis.csv",
+                    mime="text/csv"
+                )
+
+
 with tab_about:
     st.header("About This Application")
     
@@ -735,19 +1041,19 @@ with tab_about:
     ### Purpose
     This application is designed to help music researchers and clarinetists analyze 
     performance articulations using machine learning. By training on annotated 
-    recordings, the model learns to distinguish between different types of note onsets.
+    recordings, the model learns to distinguish between different phases of note articulation.
     
     ### Onset Types
     
     **Articulation (Attack) Onsets**
-    - Characterized by sharp, percussive transients
-    - Higher spectral flux and attack slope
-    - Common in tongued passages
+    - The point when an articulation begins
+    - Marks the initial transient of the note
+    - Characterized by rapid spectral and amplitude changes
     
     **Sustain Onsets**
-    - Softer, more gradual beginnings
-    - Lower attack energy
-    - Common in slurred or legato passages
+    - The point when the articulation has settled into sustained sound
+    - Marks the transition from attack phase to steady-state
+    - Follows the attack onset for the same note
     
     ### Technical Details
     
@@ -790,8 +1096,23 @@ with tab_about:
     1. **Annotate** recordings in Sonic Visualiser, creating separate layers for 
        attack and sustain onsets
     2. **Export** each layer as an SVL file
-    3. **Train** the model using the WAV + SVL file pairs
-    4. **Predict** on new recordings to automatically detect and classify onsets
+    3. **Train** the model using the WAV + SVL file pairs (Train Model tab)
+    4. **Predict** on new recordings to automatically detect and classify onsets (Predict tab)
+    5. **Analyze** timing consistency to evaluate articulation uniformity (Analyze Timing tab)
+    
+    ### Timing Analysis
+    
+    The **Analyze Timing** tab calculates the time between each attack onset and its 
+    corresponding sustain onset. This "attack duration" measures how long it takes 
+    for each note to transition from initial articulation to sustained sound.
+    
+    **Key Metrics:**
+    - **Mean Duration**: Average attack duration across all notes
+    - **Standard Deviation**: Measure of variation in attack durations
+    - **Coefficient of Variation (CV)**: Relative variability (lower = more consistent)
+    - **Outliers**: Notes with unusually long or short attack durations (>2σ from mean)
+    
+    A low CV indicates consistent articulation technique throughout the performance.
     
     ### Tips for Best Results
     
