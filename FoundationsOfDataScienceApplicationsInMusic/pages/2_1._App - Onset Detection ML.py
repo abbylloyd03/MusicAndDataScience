@@ -32,6 +32,7 @@ except ImportError:
     SKLEARN_AVAILABLE = False
 
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import seaborn as sns
 
 # ── Page config ─────────────────────────────────────────────────────
@@ -446,22 +447,23 @@ def analyze_timing_consistency(pairs_df):
     """
     durations = pairs_df['attack_duration_ms'].values
     
+    mean_val = float(np.mean(durations))
+    std_val = float(np.std(durations))
+    
     stats = {
         'count': len(durations),
-        'mean_ms': float(np.mean(durations)),
-        'std_ms': float(np.std(durations)),
+        'mean_ms': mean_val,
+        'std_ms': std_val,
         'min_ms': float(np.min(durations)),
         'max_ms': float(np.max(durations)),
         'median_ms': float(np.median(durations)),
-        'cv_percent': float(np.std(durations) / np.mean(durations) * 100) if np.mean(durations) > 0 else 0,
+        'cv_percent': float(std_val / mean_val * 100) if mean_val > 0 else float('nan'),
         'range_ms': float(np.max(durations) - np.min(durations))
     }
     
     # Identify outliers (beyond 2 standard deviations)
-    mean = stats['mean_ms']
-    std = stats['std_ms']
     pairs_df = pairs_df.copy()
-    pairs_df['is_outlier'] = (pairs_df['attack_duration_ms'] < mean - 2*std) | (pairs_df['attack_duration_ms'] > mean + 2*std)
+    pairs_df['is_outlier'] = (pairs_df['attack_duration_ms'] < mean_val - 2*std_val) | (pairs_df['attack_duration_ms'] > mean_val + 2*std_val)
     stats['outlier_count'] = int(pairs_df['is_outlier'].sum())
     
     return stats, pairs_df
@@ -511,7 +513,6 @@ def plot_timing_over_time(pairs_df, stats):
     ax.legend()
     
     # Mark outliers in legend
-    from matplotlib.lines import Line2D
     legend_elements = [
         Line2D([0], [0], marker='o', color='w', markerfacecolor='steelblue', markersize=10, label='Normal'),
         Line2D([0], [0], marker='o', color='w', markerfacecolor='red', markersize=10, label='Outlier (>2σ)'),
@@ -939,6 +940,7 @@ with tab_analyze:
         
         elif analyze_attack_svl and analyze_sustain_svl:
             with st.spinner("Parsing annotation files..."):
+                analyze_attack_svl.seek(0)
                 attack_data = parse_svl_file(analyze_attack_svl.read())
                 attack_times = frames_to_times(attack_data['frames'], attack_data['sample_rate'])
                 
