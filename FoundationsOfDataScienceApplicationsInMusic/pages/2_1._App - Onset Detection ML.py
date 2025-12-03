@@ -22,7 +22,9 @@ except ImportError:
     LIBROSA_AVAILABLE = False
 
 try:
-    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+    from sklearn.svm import SVC
+    from sklearn.neural_network import MLPClassifier
     from sklearn.model_selection import train_test_split
     from sklearn.preprocessing import StandardScaler
     from sklearn.metrics import classification_report, confusion_matrix
@@ -30,6 +32,8 @@ try:
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False
+
+import shutil
 
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -103,6 +107,21 @@ def parse_svl_file(svl_content):
 def frames_to_times(frames, sample_rate):
     """Convert frame numbers to time in seconds."""
     return [frame / sample_rate for frame in frames]
+
+
+def save_content_to_file(file_path, content):
+    """
+    Save content to a file, handling both bytes and string content.
+    
+    Args:
+        file_path: Path to save the file
+        content: Content to write (bytes or string)
+    """
+    with open(file_path, 'wb') as f:
+        if isinstance(content, bytes):
+            f.write(content)
+        else:
+            f.write(content.encode('utf-8'))
 
 
 # ── Feature Extraction ─────────────────────────────────────────────
@@ -207,7 +226,7 @@ def extract_features_at_onset(y, sr, onset_time, window_size=0.05):
     return features
 
 
-def extract_all_features(y, sr, onset_times, labels):
+def extract_all_features(y, sr, onset_times, labels, window_size=0.05):
     """
     Extract features for all onsets.
     
@@ -216,6 +235,7 @@ def extract_all_features(y, sr, onset_times, labels):
         sr: Sample rate
         onset_times: List of onset times in seconds
         labels: List of labels (0 for attack, 1 for sustain)
+        window_size: Window size in seconds around each onset
         
     Returns:
         DataFrame with features and labels
@@ -224,7 +244,7 @@ def extract_all_features(y, sr, onset_times, labels):
     valid_labels = []
     
     for onset_time, label in zip(onset_times, labels):
-        features = extract_features_at_onset(y, sr, onset_time)
+        features = extract_features_at_onset(y, sr, onset_time, window_size=window_size)
         if features is not None:
             features['onset_time'] = onset_time
             features['label'] = label
@@ -237,16 +257,74 @@ def extract_all_features(y, sr, onset_times, labels):
 
 
 # ── Model Training ─────────────────────────────────────────────────
-def train_model(features_df):
+def create_model(model_type, model_params):
     """
-    Train a Random Forest classifier on the extracted features.
+    Create a classifier based on model type and parameters.
+    
+    Args:
+        model_type: Type of model ('Random Forest', 'Gradient Boosting', 'SVM', 'Neural Network')
+        model_params: Dictionary of model parameters
+        
+    Returns:
+        Configured classifier
+    """
+    if model_type == "Random Forest":
+        return RandomForestClassifier(
+            n_estimators=model_params.get('n_estimators', 100),
+            max_depth=model_params.get('max_depth', 10),
+            min_samples_split=model_params.get('min_samples_split', 2),
+            random_state=42,
+            class_weight='balanced'
+        )
+    elif model_type == "Gradient Boosting":
+        return GradientBoostingClassifier(
+            n_estimators=model_params.get('n_estimators', 100),
+            max_depth=model_params.get('max_depth', 3),
+            learning_rate=model_params.get('learning_rate', 0.1),
+            random_state=42
+        )
+    elif model_type == "SVM":
+        return SVC(
+            C=model_params.get('C', 1.0),
+            kernel=model_params.get('kernel', 'rbf'),
+            gamma=model_params.get('gamma', 'scale'),
+            class_weight='balanced',
+            probability=True,
+            random_state=42
+        )
+    elif model_type == "Neural Network":
+        return MLPClassifier(
+            hidden_layer_sizes=model_params.get('hidden_layer_sizes', (100, 50)),
+            activation=model_params.get('activation', 'relu'),
+            learning_rate_init=model_params.get('learning_rate', 0.001),
+            max_iter=model_params.get('max_iter', 500),
+            random_state=42
+        )
+    else:
+        # Default to Random Forest
+        return RandomForestClassifier(
+            n_estimators=100,
+            max_depth=10,
+            random_state=42,
+            class_weight='balanced'
+        )
+
+
+def train_model(features_df, model_type="Random Forest", model_params=None):
+    """
+    Train a classifier on the extracted features.
     
     Args:
         features_df: DataFrame with features and 'label' column
+        model_type: Type of model to train
+        model_params: Dictionary of model hyperparameters
         
     Returns:
         tuple (model, scaler, feature_columns, metrics_dict)
     """
+    if model_params is None:
+        model_params = {}
+    
     # Separate features and labels
     feature_cols = [col for col in features_df.columns if col not in ['label', 'onset_time']]
     X = features_df[feature_cols].values
@@ -263,12 +341,7 @@ def train_model(features_df):
     X_test_scaled = scaler.transform(X_test)
     
     # Train model
-    model = RandomForestClassifier(
-        n_estimators=100,
-        max_depth=10,
-        random_state=42,
-        class_weight='balanced'
-    )
+    model = create_model(model_type, model_params)
     model.fit(X_train_scaled, y_train)
     
     # Evaluate
@@ -280,13 +353,14 @@ def train_model(features_df):
                                                         target_names=['Attack', 'Sustain'],
                                                         output_dict=True,
                                                         zero_division=0),
-        'confusion_matrix': confusion_matrix(y_test, y_pred).tolist()
+        'confusion_matrix': confusion_matrix(y_test, y_pred).tolist(),
+        'model_type': model_type
     }
     
     return model, scaler, feature_cols, metrics
 
 
-def predict_onsets(y, sr, model, scaler, feature_cols, threshold=0.1):
+def predict_onsets(y, sr, model, scaler, feature_cols, threshold=0.1, window_size=0.05):
     """
     Detect and classify onsets in audio.
     
@@ -297,6 +371,7 @@ def predict_onsets(y, sr, model, scaler, feature_cols, threshold=0.1):
         scaler: Feature scaler
         feature_cols: List of feature column names
         threshold: Onset detection threshold
+        window_size: Window size in seconds around each onset
         
     Returns:
         DataFrame with predicted onsets and their classifications
@@ -313,7 +388,7 @@ def predict_onsets(y, sr, model, scaler, feature_cols, threshold=0.1):
     valid_times = []
     
     for onset_time in onset_times:
-        features = extract_features_at_onset(y, sr, onset_time)
+        features = extract_features_at_onset(y, sr, onset_time, window_size=window_size)
         if features is not None:
             all_features.append(features)
             valid_times.append(onset_time)
@@ -543,6 +618,7 @@ if 'trained_model' not in st.session_state:
     st.session_state.scaler = None
     st.session_state.feature_cols = None
     st.session_state.training_metrics = None
+    st.session_state.window_size = 0.05
 
 
 # ── Main Application Tabs ──────────────────────────────────────────
@@ -585,6 +661,15 @@ with tab_train:
             key='train_sustain'
         )
     
+    # Option to save uploaded files to recordings folder
+    st.markdown("---")
+    st.subheader("Save Uploads")
+    save_to_recordings = st.checkbox(
+        "Save uploaded files to recordings folder for future use",
+        value=False,
+        help="When checked, uploaded files will be saved to the recordings folder so they can be used as sample data in future sessions."
+    )
+    
     # Load sample data option
     recordings_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'recordings'))
     
@@ -599,8 +684,157 @@ with tab_train:
         if wav_samples and attack_samples and sustain_samples:
             st.info(f"Found sample data: {wav_samples[0]}")
     
+    # Model Configuration Options
+    st.markdown("---")
+    st.subheader("Model Configuration")
+    
+    config_col1, config_col2 = st.columns(2)
+    
+    with config_col1:
+        # Window size for feature extraction
+        window_size = st.slider(
+            "Feature Extraction Window Size (seconds)",
+            min_value=0.01,
+            max_value=0.2,
+            value=0.05,
+            step=0.01,
+            help="Size of the window around each onset for extracting audio features. Larger windows capture more context but may blur onset boundaries."
+        )
+        
+        # Model type selection
+        model_type = st.selectbox(
+            "Model Type",
+            options=["Random Forest", "Gradient Boosting", "SVM", "Neural Network"],
+            index=0,
+            help="Select the machine learning algorithm to use for onset classification."
+        )
+    
+    with config_col2:
+        st.markdown("**Model Hyperparameters**")
+        
+        model_params = {}
+        
+        if model_type == "Random Forest":
+            model_params['n_estimators'] = st.slider(
+                "Number of Trees",
+                min_value=10,
+                max_value=500,
+                value=100,
+                step=10,
+                help="Number of decision trees in the forest. More trees generally improve accuracy but increase training time."
+            )
+            model_params['max_depth'] = st.slider(
+                "Max Tree Depth",
+                min_value=2,
+                max_value=30,
+                value=10,
+                step=1,
+                help="Maximum depth of each tree. Deeper trees can capture more complex patterns but may overfit."
+            )
+            model_params['min_samples_split'] = st.slider(
+                "Min Samples to Split",
+                min_value=2,
+                max_value=20,
+                value=2,
+                step=1,
+                help="Minimum samples required to split a node. Higher values prevent overfitting."
+            )
+        
+        elif model_type == "Gradient Boosting":
+            model_params['n_estimators'] = st.slider(
+                "Number of Boosting Stages",
+                min_value=10,
+                max_value=500,
+                value=100,
+                step=10,
+                help="Number of boosting stages. More stages can improve accuracy but increase training time."
+            )
+            model_params['max_depth'] = st.slider(
+                "Max Tree Depth",
+                min_value=1,
+                max_value=10,
+                value=3,
+                step=1,
+                help="Maximum depth of each tree. Gradient boosting typically uses shallow trees."
+            )
+            model_params['learning_rate'] = st.slider(
+                "Learning Rate",
+                min_value=0.01,
+                max_value=1.0,
+                value=0.1,
+                step=0.01,
+                help="Step size for each boosting iteration. Lower values require more trees but can improve accuracy."
+            )
+        
+        elif model_type == "SVM":
+            model_params['C'] = st.slider(
+                "Regularization Parameter (C)",
+                min_value=0.01,
+                max_value=100.0,
+                value=1.0,
+                step=0.1,
+                help="Regularization parameter. Higher values create a tighter fit to training data."
+            )
+            model_params['kernel'] = st.selectbox(
+                "Kernel Type",
+                options=["rbf", "linear", "poly", "sigmoid"],
+                index=0,
+                help="Kernel function for the SVM. RBF is a good default for most problems."
+            )
+            model_params['gamma'] = st.selectbox(
+                "Gamma",
+                options=["scale", "auto"],
+                index=0,
+                help="Kernel coefficient. 'scale' uses 1/(n_features * X.var())."
+            )
+        
+        elif model_type == "Neural Network":
+            layer1_size = st.slider(
+                "First Hidden Layer Size",
+                min_value=10,
+                max_value=200,
+                value=100,
+                step=10,
+                help="Number of neurons in the first hidden layer."
+            )
+            layer2_size = st.slider(
+                "Second Hidden Layer Size",
+                min_value=10,
+                max_value=200,
+                value=50,
+                step=10,
+                help="Number of neurons in the second hidden layer."
+            )
+            model_params['hidden_layer_sizes'] = (layer1_size, layer2_size)
+            model_params['activation'] = st.selectbox(
+                "Activation Function",
+                options=["relu", "tanh", "logistic"],
+                index=0,
+                help="Activation function for the hidden layers."
+            )
+            model_params['learning_rate'] = st.slider(
+                "Learning Rate",
+                min_value=0.0001,
+                max_value=0.1,
+                value=0.001,
+                step=0.0001,
+                format="%.4f",
+                help="Initial learning rate for weight updates."
+            )
+            model_params['max_iter'] = st.slider(
+                "Max Iterations",
+                min_value=100,
+                max_value=2000,
+                value=500,
+                step=100,
+                help="Maximum number of training iterations."
+            )
+    
+    st.markdown("---")
+    
     if st.button("Train Model", type="primary"):
         all_features = []
+        uploaded_files_saved = False
         
         # Determine data source
         if use_sample and os.path.exists(recordings_dir):
@@ -633,7 +867,7 @@ with tab_train:
                     labels = [0] * len(attack_times) + [1] * len(sustain_times)  # 0=attack, 1=sustain
                     
                     # Extract features
-                    features_df = extract_all_features(y, sr, onset_times, labels)
+                    features_df = extract_all_features(y, sr, onset_times, labels, window_size=window_size)
                     if not features_df.empty:
                         all_features.append(features_df)
                     
@@ -669,8 +903,10 @@ with tab_train:
                 if attack_svl and sustain_svl:
                     with st.spinner(f"Processing {wav_file.name}..."):
                         # Save WAV temporarily and load
+                        wav_file.seek(0)
+                        wav_content = wav_file.read()
                         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
-                            tmp.write(wav_file.read())
+                            tmp.write(wav_content)
                             tmp_path = tmp.name
                         
                         y, sr = librosa.load(tmp_path, sr=None)
@@ -678,18 +914,43 @@ with tab_train:
                         
                         # Parse SVL files
                         attack_svl.seek(0)
-                        attack_data = parse_svl_file(attack_svl.read())
+                        attack_content = attack_svl.read()
+                        attack_data = parse_svl_file(attack_content)
                         attack_times = frames_to_times(attack_data['frames'], attack_data['sample_rate'])
                         
                         sustain_svl.seek(0)
-                        sustain_data = parse_svl_file(sustain_svl.read())
+                        sustain_content = sustain_svl.read()
+                        sustain_data = parse_svl_file(sustain_content)
                         sustain_times = frames_to_times(sustain_data['frames'], sustain_data['sample_rate'])
+                        
+                        # Save to recordings folder if option is selected
+                        if save_to_recordings and not uploaded_files_saved:
+                            try:
+                                if not os.path.exists(recordings_dir):
+                                    os.makedirs(recordings_dir)
+                                
+                                # Save WAV file
+                                wav_save_path = os.path.join(recordings_dir, wav_file.name)
+                                save_content_to_file(wav_save_path, wav_content)
+                                
+                                # Save attack SVL file
+                                attack_save_path = os.path.join(recordings_dir, attack_svl.name)
+                                save_content_to_file(attack_save_path, attack_content)
+                                
+                                # Save sustain SVL file
+                                sustain_save_path = os.path.join(recordings_dir, sustain_svl.name)
+                                save_content_to_file(sustain_save_path, sustain_content)
+                                
+                                st.success(f"✓ Saved {wav_file.name} and annotation files to recordings folder")
+                                uploaded_files_saved = True
+                            except Exception as e:
+                                st.warning(f"Could not save files to recordings folder: {str(e)}")
                         
                         # Combine and extract features
                         onset_times = attack_times + sustain_times
                         labels = [0] * len(attack_times) + [1] * len(sustain_times)
                         
-                        features_df = extract_all_features(y, sr, onset_times, labels)
+                        features_df = extract_all_features(y, sr, onset_times, labels, window_size=window_size)
                         if not features_df.empty:
                             all_features.append(features_df)
                         
@@ -717,16 +978,21 @@ with tab_train:
             if len(combined_features) < 10:
                 st.warning("Not enough samples for reliable training. Consider adding more annotated data.")
             else:
-                with st.spinner("Training model..."):
-                    model, scaler, feature_cols, metrics = train_model(combined_features)
+                with st.spinner(f"Training {model_type} model..."):
+                    model, scaler, feature_cols, metrics = train_model(
+                        combined_features, 
+                        model_type=model_type, 
+                        model_params=model_params
+                    )
                     
                     # Store in session state
                     st.session_state.trained_model = model
                     st.session_state.scaler = scaler
                     st.session_state.feature_cols = feature_cols
                     st.session_state.training_metrics = metrics
+                    st.session_state.window_size = window_size
                 
-                st.success("Model trained successfully!")
+                st.success(f"{model_type} model trained successfully!")
                 
                 # Show metrics
                 st.subheader("Model Performance")
@@ -758,11 +1024,14 @@ with tab_train:
                     st.pyplot(fig)
                     plt.close(fig)
                 
-                # Feature importance
-                st.subheader("Feature Importance")
-                fig = plot_feature_importance(model, feature_cols)
-                st.pyplot(fig)
-                plt.close(fig)
+                # Feature importance (only for models that support it)
+                if hasattr(model, 'feature_importances_'):
+                    st.subheader("Feature Importance")
+                    fig = plot_feature_importance(model, feature_cols)
+                    st.pyplot(fig)
+                    plt.close(fig)
+                else:
+                    st.info(f"Feature importance visualization is not available for {model_type} models.")
                 
                 # Download model
                 st.subheader("Download Trained Model")
@@ -770,7 +1039,9 @@ with tab_train:
                     joblib.dump({
                         'model': model,
                         'scaler': scaler,
-                        'feature_cols': feature_cols
+                        'feature_cols': feature_cols,
+                        'window_size': window_size,
+                        'model_type': model_type
                     }, tmp.name)
                     with open(tmp.name, 'rb') as f:
                         st.download_button(
@@ -813,7 +1084,11 @@ with tab_predict:
             st.session_state.trained_model = loaded['model']
             st.session_state.scaler = loaded['scaler']
             st.session_state.feature_cols = loaded['feature_cols']
-            st.success("✓ Model loaded successfully")
+            # Load window_size if available (backward compatibility)
+            if 'window_size' in loaded:
+                st.session_state.window_size = loaded['window_size']
+            model_type_info = loaded.get('model_type', 'Unknown')
+            st.success(f"✓ Model loaded successfully ({model_type_info})")
             model_ready = True
     
     if model_ready:
@@ -836,12 +1111,13 @@ with tab_predict:
                 y, sr = librosa.load(tmp_path, sr=None)
                 os.unlink(tmp_path)
                 
-                # Predict
+                # Predict using the window_size from session state
                 results = predict_onsets(
                     y, sr,
                     st.session_state.trained_model,
                     st.session_state.scaler,
-                    st.session_state.feature_cols
+                    st.session_state.feature_cols,
+                    window_size=st.session_state.window_size
                 )
                 
                 if results.empty:
@@ -1063,11 +1339,21 @@ with tab_about:
     - Time-domain: RMS energy, zero-crossing rate, attack slope
     - Spectral: Centroid, bandwidth, rolloff, flatness, flux
     - MFCCs: 13 mel-frequency cepstral coefficients (mean and std)
+    - Configurable window size for feature extraction (default: 50ms)
     
-    **Model**
-    - Random Forest Classifier with 100 trees
-    - Balanced class weights for handling imbalanced data
-    - StandardScaler normalization
+    **Available Model Types**
+    - **Random Forest**: Ensemble of decision trees, good default choice
+    - **Gradient Boosting**: Sequential ensemble method, often more accurate
+    - **SVM (Support Vector Machine)**: Effective for high-dimensional data
+    - **Neural Network (MLP)**: Multi-layer perceptron for complex patterns
+    
+    **Model Configuration Options**
+    - Window size for feature extraction
+    - Number of trees/estimators
+    - Tree depth and complexity parameters
+    - Learning rate (for boosting and neural networks)
+    - Kernel type (for SVM)
+    - Hidden layer sizes (for neural networks)
     
     ### SVL File Format
     
