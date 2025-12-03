@@ -1092,14 +1092,16 @@ with tab_train:
                         'window_size': window_size,
                         'model_type': model_type
                     }, tmp.name)
-                    with open(tmp.name, 'rb') as f:
-                        st.download_button(
-                            label="Download Model (.joblib)",
-                            data=f.read(),
-                            file_name="onset_detection_model.joblib",
-                            mime="application/octet-stream"
-                        )
-                    os.unlink(tmp.name)
+                    tmp_path = tmp.name
+                
+                with open(tmp_path, 'rb') as f:
+                    st.download_button(
+                        label="Download Model (.joblib)",
+                        data=f.read(),
+                        file_name="onset_detection_model.joblib",
+                        mime="application/octet-stream"
+                    )
+                os.unlink(tmp_path)
 
 
 with tab_predict:
