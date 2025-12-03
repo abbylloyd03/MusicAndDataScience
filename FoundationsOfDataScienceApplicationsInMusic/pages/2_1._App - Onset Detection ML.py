@@ -133,7 +133,12 @@ def generate_base_name():
         str: Base name in format 'M_D_YYYY_HHMMSS' (e.g., '12_3_2025_143025')
     """
     now = datetime.now()
-    return now.strftime("%-m_%-d_%Y_%H%M%S")
+    # Use cross-platform compatible format with manual zero-stripping
+    month = str(now.month)
+    day = str(now.day)
+    year = str(now.year)
+    time_suffix = now.strftime("%H%M%S")
+    return f"{month}_{day}_{year}_{time_suffix}"
 
 
 def generate_corresponding_filenames(base_name):
@@ -912,6 +917,9 @@ with tab_train:
             # Use uploaded files
             # Match files by name or by index if only one of each type
             
+            # Generate base name for saving files (done once before processing to ensure consistency)
+            new_base_name = generate_base_name()
+            
             # If there's only one of each type, match them by index
             if len(wav_files) == 1 and len(attack_svl_files) == 1 and len(sustain_svl_files) == 1:
                 file_pairs = [(wav_files[0], attack_svl_files[0], sustain_svl_files[0])]
@@ -967,8 +975,7 @@ with tab_train:
                             if not os.path.exists(recordings_dir):
                                 os.makedirs(recordings_dir)
                             
-                            # Generate corresponding filenames
-                            new_base_name = generate_base_name()
+                            # Generate corresponding filenames using pre-generated base name
                             wav_filename, attack_filename, sustain_filename = generate_corresponding_filenames(new_base_name)
                             
                             # Save WAV file with new name
