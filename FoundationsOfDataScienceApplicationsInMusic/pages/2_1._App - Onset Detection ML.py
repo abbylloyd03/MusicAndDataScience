@@ -13,6 +13,7 @@ import tempfile
 import os
 import xml.etree.ElementTree as ET
 from io import BytesIO
+from datetime import datetime
 
 # Audio processing and ML imports
 try:
@@ -122,6 +123,38 @@ def save_content_to_file(file_path, content):
             f.write(content)
         else:
             f.write(content.encode('utf-8'))
+
+
+def generate_base_name():
+    """
+    Generate a consistent base name for files using timestamp.
+    
+    Returns:
+        str: Base name in format 'M_D_YYYY_HHMMSS' (e.g., '12_3_2025_143025')
+    """
+    now = datetime.now()
+    # Use cross-platform compatible format with manual zero-stripping
+    month = str(now.month)
+    day = str(now.day)
+    year = str(now.year)
+    time_suffix = now.strftime("%H%M%S")
+    return f"{month}_{day}_{year}_{time_suffix}"
+
+
+def generate_corresponding_filenames(base_name):
+    """
+    Generate corresponding filenames for WAV and SVL files.
+    
+    Args:
+        base_name: The base name to use for all files
+        
+    Returns:
+        tuple: (wav_filename, attack_filename, sustain_filename)
+    """
+    wav_filename = f"{base_name}.wav"
+    attack_filename = f"{base_name}_attacks.svl"
+    sustain_filename = f"{base_name}_sustain.svl"
+    return wav_filename, attack_filename, sustain_filename
 
 
 # ── Feature Extraction ─────────────────────────────────────────────
@@ -882,83 +915,99 @@ with tab_train:
         
         elif wav_files and attack_svl_files and sustain_svl_files:
             # Use uploaded files
-            # Match files by name (assuming naming convention: filename.wav, filename_attacks.svl, filename_sustain.svl)
-            for wav_file in wav_files:
-                base_name = wav_file.name.replace('.wav', '')
-                
-                # Find matching SVL files
-                attack_svl = None
-                sustain_svl = None
-                
-                for svl in attack_svl_files:
-                    if base_name in svl.name:
-                        attack_svl = svl
-                        break
-                
-                for svl in sustain_svl_files:
-                    if base_name in svl.name:
-                        sustain_svl = svl
-                        break
-                
-                if attack_svl and sustain_svl:
-                    with st.spinner(f"Processing {wav_file.name}..."):
-                        # Save WAV temporarily and load
-                        wav_file.seek(0)
-                        wav_content = wav_file.read()
-                        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
-                            tmp.write(wav_content)
-                            tmp_path = tmp.name
-                        
-                        y, sr = librosa.load(tmp_path, sr=None)
-                        os.unlink(tmp_path)
-                        
-                        # Parse SVL files
-                        attack_svl.seek(0)
-                        attack_content = attack_svl.read()
-                        attack_data = parse_svl_file(attack_content)
-                        attack_times = frames_to_times(attack_data['frames'], attack_data['sample_rate'])
-                        
-                        sustain_svl.seek(0)
-                        sustain_content = sustain_svl.read()
-                        sustain_data = parse_svl_file(sustain_content)
-                        sustain_times = frames_to_times(sustain_data['frames'], sustain_data['sample_rate'])
-                        
-                        # Save to recordings folder if option is selected
-                        if save_to_recordings and not uploaded_files_saved:
-                            try:
-                                if not os.path.exists(recordings_dir):
-                                    os.makedirs(recordings_dir)
-                                
-                                # Save WAV file
-                                wav_save_path = os.path.join(recordings_dir, wav_file.name)
-                                save_content_to_file(wav_save_path, wav_content)
-                                
-                                # Save attack SVL file
-                                attack_save_path = os.path.join(recordings_dir, attack_svl.name)
-                                save_content_to_file(attack_save_path, attack_content)
-                                
-                                # Save sustain SVL file
-                                sustain_save_path = os.path.join(recordings_dir, sustain_svl.name)
-                                save_content_to_file(sustain_save_path, sustain_content)
-                                
-                                st.success(f"✓ Saved {wav_file.name} and annotation files to recordings folder")
-                                uploaded_files_saved = True
-                            except Exception as e:
-                                st.warning(f"Could not save files to recordings folder: {str(e)}")
-                        
-                        # Combine and extract features
-                        onset_times = attack_times + sustain_times
-                        labels = [0] * len(attack_times) + [1] * len(sustain_times)
-                        
-                        features_df = extract_all_features(y, sr, onset_times, labels, window_size=window_size)
-                        if not features_df.empty:
-                            all_features.append(features_df)
-                        
-                        # Visualize
-                        fig = plot_waveform_with_onsets(y, sr, attack_times, sustain_times,
-                                                         title=f"{wav_file.name}")
-                        st.pyplot(fig)
-                        plt.close(fig)
+            # Match files by name or by index if only one of each type
+            
+            # Generate base name for saving files (done once before processing to ensure consistency)
+            new_base_name = generate_base_name()
+            
+            # If there's only one of each type, match them by index
+            if len(wav_files) == 1 and len(attack_svl_files) == 1 and len(sustain_svl_files) == 1:
+                file_pairs = [(wav_files[0], attack_svl_files[0], sustain_svl_files[0])]
+            else:
+                # Match files by name (assuming naming convention: filename.wav, filename_attacks.svl, filename_sustain.svl)
+                file_pairs = []
+                for wav_file in wav_files:
+                    base_name = wav_file.name.replace('.wav', '')
+                    
+                    # Find matching SVL files
+                    attack_svl = None
+                    sustain_svl = None
+                    
+                    for svl in attack_svl_files:
+                        if base_name in svl.name:
+                            attack_svl = svl
+                            break
+                    
+                    for svl in sustain_svl_files:
+                        if base_name in svl.name:
+                            sustain_svl = svl
+                            break
+                    
+                    if attack_svl and sustain_svl:
+                        file_pairs.append((wav_file, attack_svl, sustain_svl))
+            
+            for wav_file, attack_svl, sustain_svl in file_pairs:
+                with st.spinner(f"Processing {wav_file.name}..."):
+                    # Save WAV temporarily and load
+                    wav_file.seek(0)
+                    wav_content = wav_file.read()
+                    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+                        tmp.write(wav_content)
+                        tmp_path = tmp.name
+                    
+                    y, sr = librosa.load(tmp_path, sr=None)
+                    os.unlink(tmp_path)
+                    
+                    # Parse SVL files
+                    attack_svl.seek(0)
+                    attack_content = attack_svl.read()
+                    attack_data = parse_svl_file(attack_content)
+                    attack_times = frames_to_times(attack_data['frames'], attack_data['sample_rate'])
+                    
+                    sustain_svl.seek(0)
+                    sustain_content = sustain_svl.read()
+                    sustain_data = parse_svl_file(sustain_content)
+                    sustain_times = frames_to_times(sustain_data['frames'], sustain_data['sample_rate'])
+                    
+                    # Save to recordings folder if option is selected
+                    if save_to_recordings and not uploaded_files_saved:
+                        try:
+                            if not os.path.exists(recordings_dir):
+                                os.makedirs(recordings_dir)
+                            
+                            # Generate corresponding filenames using pre-generated base name
+                            wav_filename, attack_filename, sustain_filename = generate_corresponding_filenames(new_base_name)
+                            
+                            # Save WAV file with new name
+                            wav_save_path = os.path.join(recordings_dir, wav_filename)
+                            save_content_to_file(wav_save_path, wav_content)
+                            
+                            # Save attack SVL file with new name
+                            attack_save_path = os.path.join(recordings_dir, attack_filename)
+                            save_content_to_file(attack_save_path, attack_content)
+                            
+                            # Save sustain SVL file with new name
+                            sustain_save_path = os.path.join(recordings_dir, sustain_filename)
+                            save_content_to_file(sustain_save_path, sustain_content)
+                            
+                            st.success(f"✓ Saved files as {wav_filename}, {attack_filename}, and {sustain_filename} to recordings folder")
+                            uploaded_files_saved = True
+                        except Exception as e:
+                            st.warning(f"Could not save files to recordings folder: {str(e)}")
+                    
+                    # Combine and extract features
+                    onset_times = attack_times + sustain_times
+                    labels = [0] * len(attack_times) + [1] * len(sustain_times)
+                    
+                    features_df = extract_all_features(y, sr, onset_times, labels, window_size=window_size)
+                    if not features_df.empty:
+                        all_features.append(features_df)
+                    
+                    # Visualize
+                    fig = plot_waveform_with_onsets(y, sr, attack_times, sustain_times,
+                                                     title=f"{wav_file.name}")
+                    st.pyplot(fig)
+                    plt.close(fig)
         else:
             st.warning("Please upload WAV files and corresponding SVL annotation files, or use sample data.")
         
