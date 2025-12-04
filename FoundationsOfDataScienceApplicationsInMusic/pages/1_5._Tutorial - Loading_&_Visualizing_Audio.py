@@ -239,7 +239,8 @@ Audio(y, rate=sr)
 
 st.header("Run in Google Colab")
 st.markdown("Click below to open a pre-filled Colab notebook with all the code from this tutorial:")
-st.link_button("Open in Colab", "https://colab.research.google.com/")
+st.link_button("Open in Colab", "https://colab.research.google.com/drive/1XxbQWuk2PnIqRG1lOe5yl2BwlGPHQmlK?usp=sharing")
+               
 
 st.header("Tips and Next Steps")
 st.markdown("""
