@@ -91,7 +91,7 @@ Editing Tips: Swap note names (e.g., 'C4' to 'G4' for a different pitch). Change
 
 st.header("Run in Google Colab")
 st.markdown("Click to open the updated pre-filled Colab notebook (edit and run there).")
-st.link_button("Open in Colab", "https://colab.research.google.com/drive/1o_aMtfiWU1-elLQH4zQas4_z74WGU4kH?usp=sharing")
+st.link_button("Open in Colab", "https://colab.research.google.com/drive/1vggbfkOwmsxtJ178T8YgK06tsaRgzF1P?usp=sharing")
 
 st.header("Tips and Next Steps")
 st.markdown("""
