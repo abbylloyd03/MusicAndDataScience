@@ -1,4 +1,9 @@
 import streamlit as st
+import os
+
+# Get the directory where this script is located
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+IMAGES_DIR = os.path.join(SCRIPT_DIR, '..', 'images')
 
 st.title("Tutorial: Beat Detection & Tempo Analysis with librosa")
 
@@ -97,6 +102,11 @@ plt.tight_layout()
 plt.show()
 """, language="python")
 
+# Show example output image
+waveform_beats_image = os.path.join(IMAGES_DIR, 'tutorial_6_waveform_with_beats.png')
+if os.path.exists(waveform_beats_image):
+    st.image(waveform_beats_image, caption="Example output: Waveform with detected beats marked as vertical lines", use_container_width=True)
+
 st.header("Step 4: Create a Click Track")
 st.markdown("""
 One of the most useful applications of beat detection is generating a **click track**—
@@ -152,6 +162,11 @@ plt.tight_layout()
 plt.show()
 """, language="python")
 
+# Show example output image
+onset_image = os.path.join(IMAGES_DIR, 'tutorial_6_onset_strength.png')
+if os.path.exists(onset_image):
+    st.image(onset_image, caption="Example output: Onset strength envelope showing musical energy peaks with detected beats", use_container_width=True)
+
 st.markdown("""
 **Reading the Onset Envelope:**
 - **Peaks**: Strong onsets (attacks, loud notes)
@@ -182,6 +197,11 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 """, language="python")
+
+# Show example output image
+tempogram_image = os.path.join(IMAGES_DIR, 'tutorial_6_tempogram.png')
+if os.path.exists(tempogram_image):
+    st.image(tempogram_image, caption="Example output: Tempogram showing tempo strength over time", use_container_width=True)
 
 st.markdown("""
 **Reading a Tempogram:**

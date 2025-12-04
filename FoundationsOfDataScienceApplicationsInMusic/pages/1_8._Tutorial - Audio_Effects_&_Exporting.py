@@ -1,4 +1,9 @@
 import streamlit as st
+import os
+
+# Get the directory where this script is located
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+IMAGES_DIR = os.path.join(SCRIPT_DIR, '..', 'images')
 
 st.title("Tutorial: Audio Effects & Exporting with librosa and soundfile")
 
@@ -319,6 +324,11 @@ axes[2].set_title('Pitch Shifted (+4 semitones)')
 plt.tight_layout()
 plt.show()
 """, language="python")
+
+# Show example output image
+effects_image = os.path.join(IMAGES_DIR, 'tutorial_8_effects_comparison.png')
+if os.path.exists(effects_image):
+    st.image(effects_image, caption="Example output: Comparison of original, time-stretched, and pitch-shifted audio", use_container_width=True)
 
 st.header("Complete Processing Pipeline")
 st.markdown("""

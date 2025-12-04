@@ -1,4 +1,9 @@
 import streamlit as st
+import os
+
+# Get the directory where this script is located
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+IMAGES_DIR = os.path.join(SCRIPT_DIR, '..', 'images')
 
 st.title("Tutorial: Loading & Visualizing Audio with librosa")
 
@@ -91,6 +96,11 @@ plt.tight_layout()
 plt.show()
 """, language="python")
 
+# Show example output image
+waveform_image = os.path.join(IMAGES_DIR, 'tutorial_5_waveform.png')
+if os.path.exists(waveform_image):
+    st.image(waveform_image, caption="Example output: Audio waveform showing amplitude over time", use_container_width=True)
+
 st.markdown("""
 **What to look for in a waveform:**
 - **Peaks**: Loud moments in the music
@@ -123,6 +133,11 @@ plt.tight_layout()
 plt.show()
 """, language="python")
 
+# Show example output image
+spectrogram_image = os.path.join(IMAGES_DIR, 'tutorial_5_spectrogram.png')
+if os.path.exists(spectrogram_image):
+    st.image(spectrogram_image, caption="Example output: Spectrogram showing frequency content over time", use_container_width=True)
+
 st.markdown("""
 **Reading a spectrogram:**
 - **Horizontal lines**: Sustained pitches or harmonics
@@ -154,6 +169,11 @@ plt.title('Mel Spectrogram')
 plt.tight_layout()
 plt.show()
 """, language="python")
+
+# Show example output image
+mel_spectrogram_image = os.path.join(IMAGES_DIR, 'tutorial_5_mel_spectrogram.png')
+if os.path.exists(mel_spectrogram_image):
+    st.image(mel_spectrogram_image, caption="Example output: Mel spectrogram with perceptually-scaled frequency axis", use_container_width=True)
 
 st.markdown("""
 **Why use Mel spectrograms?**
@@ -236,6 +256,11 @@ plt.show()
 # Play the audio
 Audio(y, rate=sr)
 """, language="python")
+
+# Show example output image
+combined_image = os.path.join(IMAGES_DIR, 'tutorial_5_combined_visualizations.png')
+if os.path.exists(combined_image):
+    st.image(combined_image, caption="Example output: Combined visualizations showing waveform, spectrogram, and Mel spectrogram", use_container_width=True)
 
 st.header("Run in Google Colab")
 st.markdown("Click below to open a pre-filled Colab notebook with all the code from this tutorial:")
