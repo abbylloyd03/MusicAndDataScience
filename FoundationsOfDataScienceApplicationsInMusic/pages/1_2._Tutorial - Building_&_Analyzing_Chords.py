@@ -1,4 +1,9 @@
 import streamlit as st
+import os
+
+# Get the directory where this script is located
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+IMAGES_DIR = os.path.join(SCRIPT_DIR, '..', 'images')
 
 st.title("Tutorial - Building & Analyzing Chords with music21 and pandas")
 
@@ -206,6 +211,11 @@ print(major_triads)
 # Export to CSV
 df.to_csv('chord_analysis.csv', index=False)
 """, language="python")
+
+# Show example output image
+df_image = os.path.join(IMAGES_DIR, 'tutorial_2_chord_progression_df.png')
+if os.path.exists(df_image):
+    st.image(df_image, caption="Example output: Chord analysis DataFrame showing chord properties", use_container_width=True)
 
 st.markdown("""
 DataFrame Tips: Add more columns (e.g., 'Interval Vector': element.intervalVector). Use Pandas for stats like `df['Duration'].mean()` or plotting (requires Matplotlib: `!pip install matplotlib` and `df.plot()`).

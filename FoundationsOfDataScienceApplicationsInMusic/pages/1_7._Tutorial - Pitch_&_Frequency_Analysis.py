@@ -1,4 +1,9 @@
 import streamlit as st
+import os
+
+# Get the directory where this script is located
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+IMAGES_DIR = os.path.join(SCRIPT_DIR, '..', 'images')
 
 st.title("Tutorial: Pitch & Frequency Analysis with librosa")
 
@@ -81,6 +86,11 @@ plt.tight_layout()
 plt.show()
 """, language="python")
 
+# Show example output image
+spectrum_image = os.path.join(IMAGES_DIR, 'tutorial_7_frequency_spectrum.png')
+if os.path.exists(spectrum_image):
+    st.image(spectrum_image, caption="Example output: Frequency spectrum showing harmonic content at a single moment", use_container_width=True)
+
 st.markdown("""
 **Reading a spectrum:**
 - The **first peak** (leftmost) is usually the fundamental frequency
@@ -111,6 +121,11 @@ plt.title('Chromagram - Pitch Class Energy Over Time')
 plt.tight_layout()
 plt.show()
 """, language="python")
+
+# Show example output image
+chromagram_image = os.path.join(IMAGES_DIR, 'tutorial_7_chromagram.png')
+if os.path.exists(chromagram_image):
+    st.image(chromagram_image, caption="Example output: Chromagram showing pitch class energy over time", use_container_width=True)
 
 st.markdown("""
 **Reading a chromagram:**
@@ -153,6 +168,11 @@ if len(valid_f0) > 0:
     print(f"Average detected pitch: {np.mean(valid_f0):.1f} Hz")
     print(f"Pitch range: {np.min(valid_f0):.1f} - {np.max(valid_f0):.1f} Hz")
 """, language="python")
+
+# Show example output image
+pitch_image = os.path.join(IMAGES_DIR, 'tutorial_7_pitch_detection.png')
+if os.path.exists(pitch_image):
+    st.image(pitch_image, caption="Example output: Pitch detection showing fundamental frequency over time", use_container_width=True)
 
 st.header("Step 5: Convert Frequencies to Musical Notes")
 st.markdown("""
@@ -205,6 +225,11 @@ plt.tight_layout()
 plt.show()
 """, language="python")
 
+# Show example output image
+pitch_overlay_image = os.path.join(IMAGES_DIR, 'tutorial_7_pitch_overlay.png')
+if os.path.exists(pitch_overlay_image):
+    st.image(pitch_overlay_image, caption="Example output: Detected pitch overlaid on spectrogram for verification", use_container_width=True)
+
 st.header("Step 7: Harmonic-Percussive Source Separation")
 st.markdown("""
 Music contains both **harmonic** (pitched) and **percussive** (rhythmic) components.
@@ -239,6 +264,11 @@ plt.show()
 print("Original:")
 Audio(y, rate=sr)
 """, language="python")
+
+# Show example output image
+hpss_image = os.path.join(IMAGES_DIR, 'tutorial_7_hpss.png')
+if os.path.exists(hpss_image):
+    st.image(hpss_image, caption="Example output: Harmonic-percussive source separation showing original, harmonic, and percussive components", use_container_width=True)
 
 st.code("""
 print("Harmonic component only:")
@@ -282,6 +312,11 @@ dominant_pc = pitch_classes[np.argmax(chroma_sum)]
 print(f"Most prominent pitch class: {dominant_pc}")
 print("(This suggests the piece may be in or related to this key)")
 """, language="python")
+
+# Show example output image
+pitch_class_image = os.path.join(IMAGES_DIR, 'tutorial_7_pitch_class_distribution.png')
+if os.path.exists(pitch_class_image):
+    st.image(pitch_class_image, caption="Example output: Pitch class distribution for key detection", use_container_width=True)
 
 st.header("Complete Analysis Example")
 st.markdown("""
